@@ -1,0 +1,189 @@
+name: Import ZIP & merge features
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'incoming/**/*.zip'
+      - 'incoming/*.zip'
+  workflow_dispatch:
+    inputs:
+      zip_path:
+        description: 'Chemin du ZIP dans le repo (ex. incoming/upchat2-source.zip)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  import-and-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UpChat2
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Locate ZIP
+        id: zip
+        run: |
+          set -e
+          ZIP=""
+          if [ -n "${{ github.event.inputs.zip_path }}" ] && [ -f "${{ github.event.inputs.zip_path }}" ]; then
+            ZIP="${{ github.event.inputs.zip_path }}"
+          else
+            ZIP=$(find incoming -type f -name '*.zip' 2>/dev/null | head -1 || true)
+          fi
+          if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
+            echo "::error::Aucun fichier .zip trouvé dans incoming/. Upload upchat2-source.zip d’abord."
+            exit 1
+          fi
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "ZIP trouvé : $ZIP ($(du -h "$ZIP" | cut -f1))"
+
+      - name: Extract ZIP to workspace
+        run: |
+          set -e
+          ZIP="${{ steps.zip.outputs.zip }}"
+          rm -rf /tmp/upchat2-extract
+          mkdir -p /tmp/upchat2-extract
+          unzip -q "$ZIP" -d /tmp/upchat2-extract
+
+          # Trouve la racine Flutter (pubspec.yaml)
+          ROOT=$(find /tmp/upchat2-extract -name 'pubspec.yaml' -not -path '*/.*' | head -1 | xargs dirname || true)
+          if [ -z "$ROOT" ] || [ ! -f "$ROOT/pubspec.yaml" ]; then
+            echo "::error::pubspec.yaml introuvable dans le ZIP. Le projet Flutter doit être à la racine ou dans un sous-dossier."
+            find /tmp/upchat2-extract -maxdepth 3 -type f | head -40
+            exit 1
+          fi
+          echo "Racine Flutter : $ROOT"
+
+          # Préserve incoming/ et .github/
+          mkdir -p /tmp/preserve
+          cp -a incoming /tmp/preserve/ 2>/dev/null || true
+          cp -a .github /tmp/preserve/ 2>/dev/null || true
+          cp -a README.md /tmp/preserve/ 2>/dev/null || true
+
+          # Remplace le contenu du repo par le projet extrait (sauf .git)
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -a "$ROOT"/. .
+
+          # Restaure incoming, workflows, README
+          rm -rf incoming .github
+          cp -a /tmp/preserve/incoming .
+          cp -a /tmp/preserve/.github .
+          cp -a /tmp/preserve/README.md . 2>/dev/null || true
+
+          test -f pubspec.yaml
+          test -d lib
+          echo "Extraction OK"
+
+      - name: Clone upchat (source des fonctionnalités)
+        run: |
+          set -e
+          rm -rf /tmp/upchat-src
+          git clone --depth 1 https://github.com/alexchep47-gif/upchat.git /tmp/upchat-src
+          echo "upchat HEAD: $(git -C /tmp/upchat-src rev-parse --short HEAD)"
+
+      - name: Merge missing / fixed features from upchat
+        run: |
+          set -e
+          SRC=/tmp/upchat-src
+          DEST="$GITHUB_WORKSPACE"
+
+          # Liste des modules à importer depuis upchat (fonctionnalités + correctifs)
+          PATHS=(
+            "lib/features/auth/login_screen.dart"
+            "lib/data/services/firebase_auth_service.dart"
+            "lib/data/services/internet_service.dart"
+            "lib/data/services/storage_service.dart"
+            "lib/data/models/message_model.dart"
+            "lib/providers/chat_provider.dart"
+            "lib/core/theme/app_glass.dart"
+            "lib/core/theme/app_theme.dart"
+            "lib/core/theme/app_colors.dart"
+            "lib/widgets/glass_container.dart"
+            "lib/features/chat/chat_screen.dart"
+            "lib/features/contacts/contact_detail_screen.dart"
+            "lib/core/routes/app_router.dart"
+            "lib/main.dart"
+            "lib/core/constants/app_constants.dart"
+            "lib/firebase_options.dart"
+          )
+
+          mkdir -p "$DEST/lib/features/auth"
+          mkdir -p "$DEST/lib/features/chat"
+          mkdir -p "$DEST/lib/features/contacts"
+          mkdir -p "$DEST/lib/data/services"
+          mkdir -p "$DEST/lib/data/models"
+          mkdir -p "$DEST/lib/providers"
+          mkdir -p "$DEST/lib/core/theme"
+          mkdir -p "$DEST/lib/core/routes"
+          mkdir -p "$DEST/lib/core/constants"
+          mkdir -p "$DEST/lib/widgets"
+
+          MERGED=0
+          for rel in "${PATHS[@]}"; do
+            if [ -f "$SRC/$rel" ]; then
+              mkdir -p "$(dirname "$DEST/$rel")"
+              cp -f "$SRC/$rel" "$DEST/$rel"
+              echo "✓ $rel"
+              MERGED=$((MERGED + 1))
+            else
+              echo "· absent dans upchat : $rel"
+            fi
+          done
+
+          # pubspec : s’assurer des dépendances critiques sans écraser tout le fichier utilisateur
+          if [ -f "$DEST/pubspec.yaml" ]; then
+            for dep in firebase_core firebase_auth google_sign_in provider hive_flutter flutter_secure_storage http uuid intl; do
+              if ! grep -qE "^\s*${dep}:" "$DEST/pubspec.yaml"; then
+                # Ajoute sous dependencies: si manquant (best-effort)
+                if grep -q '^dependencies:' "$DEST/pubspec.yaml"; then
+                  sed -i "/^dependencies:/a\  ${dep}: any" "$DEST/pubspec.yaml"
+                  echo "+ dépendance ajoutée : $dep"
+                fi
+              fi
+            done
+          fi
+
+          # Marqueur de fusion
+          mkdir -p "$DEST/docs"
+          cat > "$DEST/docs/MERGE_FROM_UPCHAT.md" << EOF
+          # Fusion depuis upchat
+
+          - Date (UTC) : $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          - Fichiers copiés : $MERGED
+          - Source : https://github.com/alexchep47-gif/upchat
+          - SHA upchat : $(git -C /tmp/upchat-src rev-parse HEAD)
+
+          Modules : auth Google, internet/signalisation, chat (conversationId), glass UI, fiche contact, thème, routes.
+          EOF
+
+          echo "Fusion terminée ($MERGED fichiers)"
+
+      - name: Commit merged project
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "Aucun changement à committer"
+          else
+            git commit -m "feat: import ZIP + fusion fonctionnalités depuis upchat ($(date -u +%Y-%m-%d))"
+            git push origin main
+            echo "Poussé sur main"
+          fi
+
+      - name: Trigger APK build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/alexchep47-gif/UpChat2/actions/workflows/build.yml/dispatches" \
+            -d '{"ref":"main"}' || echo "Build déclenché ou workflow absent"
