@@ -1,53 +1,37 @@
 # UpChat2
 
-Deuxième base UpChat. Ce dépôt est conçu pour **recevoir un ZIP** de ton projet, puis **récupérer automatiquement** les fonctionnalités manquantes depuis le dépôt principal [`alexchep47-gif/upchat`](https://github.com/alexchep47-gif/upchat).
+Deuxième base UpChat. Reçoit un **ZIP** de ton projet, puis **importe les fonctionnalités manquantes** depuis [`alexchep47-gif/upchat`](https://github.com/alexchep47-gif/upchat).
 
-## Comment envoyer ton ZIP
+## ZIP trop gros (ex. 62 Mo) — limite navigateur 25 Mo
 
-### Méthode recommandée (téléphone / navigateur)
+**Ne force pas l’upload** sur GitHub (max ~25 Mo via le site).
 
-1. Ouvre https://github.com/alexchep47-gif/UpChat2  
-2. Clique **Add file** → **Upload files**  
-3. Dépose ton fichier dans le dossier **`incoming/`**  
-   - Nom conseillé : `incoming/upchat2-source.zip`  
-4. Commit sur la branche **`main`**  
-5. Va dans l’onglet **Actions** → workflow **Import ZIP & merge features**  
-6. Quand c’est vert, lance **Build Android** si besoin  
-7. Télécharge l’artefact **upchat2-apk**
+### Méthode 1 — URL (la plus simple)
 
-### Méthode manuelle (workflow)
+1. Envoie le ZIP sur **Google Drive / Dropbox / WeTransfer**
+2. Récupère un **lien de téléchargement direct**
+3. Repo **UpChat2** → onglet **Actions**
+4. Workflow **Import ZIP & merge features** → **Run workflow**
+5. Champ **`zip_url`** : colle le lien
+6. Valide — le runner télécharge le fichier (jusqu’à plusieurs centaines de Mo)
 
-1. **Actions** → **Import ZIP & merge features** → **Run workflow**  
-2. Indique le chemin du ZIP déjà présent dans le repo (ex. `incoming/upchat2-source.zip`)
+Astuce Google Drive : lien du type  
+`https://drive.google.com/uc?export=download&id=FILE_ID`  
+(remplace `FILE_ID` par l’id du fichier dans l’URL partage).
 
-## Ce que le workflow fait
+### Méthode 2 — ZIP allégé &lt; 25 Mo
 
-1. Décompresse le ZIP (racine Flutter attendue : `pubspec.yaml` + `lib/`)  
-2. Clone le dépôt **upchat** (source des fonctionnalités)  
-3. Copie / écrase les modules manquants ou corrigés :  
-   - Auth Google + login  
-   - Mode internet / signalisation  
-   - Chat (réception messages, conversationId)  
-   - Glassmorphisme (`AppGlass`, `GlassSurface`)  
-   - Fiche contact  
-   - Thème, routes, `StorageService.setUserId`, etc.  
-4. Commit le résultat sur `main`  
-5. (Optionnel) déclenche le build APK
+Supprime avant compression : `build/`, `.dart_tool/`, `.idea/`, `android/.gradle/`, `ios/Pods/`.  
+Puis **Add file → Upload files** dans `incoming/`.
 
-## Secrets GitHub à recopier depuis `upchat`
+### Méthode 3 — Release GitHub
 
-Dans **Settings → Secrets and variables → Actions**, ajoute au minimum :
+Crée une Release, attache le ZIP (limite bien plus haute), puis utilise l’URL de l’asset dans `zip_url`.
 
-| Secret | Rôle |
-|--------|------|
-| `FIREBASE_ANDROID_JSON_BASE64` | `google-services.json` |
-| `FIREBASE_OPTIONS_DART_BASE64` | `lib/firebase_options.dart` |
-| `UPCHAT_KEYSTORE_BASE64` | Keystore release |
-| `UPCHAT_KEYSTORE_PASSWORD` | Mot de passe store |
-| `UPCHAT_KEY_ALIAS` | Alias (souvent `upchat`) |
-| `UPCHAT_KEY_PASSWORD` | Mot de passe clé |
-| `GOOGLE_SERVER_CLIENT_ID` | Client OAuth **Web** Firebase |
+## Secrets
+
+Recopie depuis `upchat` : `FIREBASE_*`, keystore, `GOOGLE_SERVER_CLIENT_ID`, etc.
 
 ## Auteur
 
-Créé par **NEMMEGNE CHEPING ALEXANDRE MERVIN** — Nationalité : Camerounaise.
+**NEMMEGNE CHEPING ALEXANDRE MERVIN** — Nationalité : Camerounaise.
